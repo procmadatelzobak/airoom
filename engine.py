@@ -9,10 +9,10 @@ from pathlib import Path
 
 import yaml
 
-from llm_client import MIN_DELAY
+from llm_client import TokenTracker, set_delay, get_delay
 from narrator import Narrator
 from npc import NPC
-from scenario import DEFAULT_SCENARIO, Scenario
+from scenario import DEFAULT_SCENARIO, SCENARIOS, Scenario
 
 
 class Session:
@@ -23,9 +23,13 @@ class Session:
         self.config = config or {}
         models = self.config.get("models", {})
 
+        # Shared token tracker for the whole session
+        self.token_tracker = TokenTracker()
+
         self.narrator = Narrator(
             self.scenario,
-            models.get("narrator", "deepseek/deepseek-chat-v3-0324:free")
+            models.get("narrator", "deepseek/deepseek-chat-v3-0324:free"),
+            token_tracker=self.token_tracker,
         )
         self.npcs = []
         npc_model_keys = ["npc_1", "npc_2", "npc_3"]
@@ -37,7 +41,7 @@ class Session:
         for i, npc_def in enumerate(self.scenario.npcs):
             model_key = npc_model_keys[i] if i < len(npc_model_keys) else f"npc_{i+1}"
             model = models.get(model_key, default_models[i] if i < len(default_models) else default_models[0])
-            self.npcs.append(NPC(npc_def, model))
+            self.npcs.append(NPC(npc_def, model, token_tracker=self.token_tracker))
 
         self.rounds: list[dict] = []
         self.status = "idle"  # idle, running, paused, finished, error
@@ -57,10 +61,19 @@ class Session:
         if self._on_event:
             await self._on_event(event_type, data)
 
+    async def _emit_tokens(self):
+        """Emit current token stats."""
+        await self._emit("tokens", self.token_tracker.to_dict())
+
     async def run(self):
         """Run the full negotiation session."""
         self.status = "running"
-        await self._emit("status", {"status": "running", "session_id": self.session_id})
+        await self._emit("status", {
+            "status": "running",
+            "session_id": self.session_id,
+            "scenario_id": self.scenario.id,
+            "scenario_title": self.scenario.title,
+        })
 
         try:
             # Opening scene
@@ -72,6 +85,7 @@ class Session:
                 "npc_actions": [],
             })
             await self._emit("round", {"round": 0, "narrator": narrator_result, "npc_actions": []})
+            await self._emit_tokens()
 
             # Main loop
             prev_public_actions = []
@@ -113,6 +127,7 @@ class Session:
                         "round": round_num,
                         "npc": action
                     })
+                    await self._emit_tokens()
 
                 # Public actions (no thinking) for next round's NPC input
                 prev_public_actions = [
@@ -144,6 +159,7 @@ class Session:
                     "narrator": narrator_result,
                     "npc_actions": npc_actions,
                 })
+                await self._emit_tokens()
 
                 # Check end
                 if narrator_result.get("scenario_ended"):
@@ -154,6 +170,7 @@ class Session:
             await self._emit("phase", {"phase": "epilogue", "detail": "Vypravěč píše epilog..."})
             self.epilogue = await self.narrator.write_epilogue(last_actions)
             await self._emit("epilogue", {"text": self.epilogue})
+            await self._emit_tokens()
 
             self.status = "finished"
             await self._emit("status", {"status": "finished"})
@@ -205,17 +222,37 @@ class Session:
             lines.append("## Epilog\n")
             lines.append(self.epilogue)
 
+        # Token stats at the end
+        t = self.token_tracker
+        lines.append("\n---\n## Statistiky")
+        lines.append(f"- Celkem tokenů: {t.total_tokens}")
+        lines.append(f"- Prompt tokenů: {t.total_prompt}")
+        lines.append(f"- Completion tokenů: {t.total_completion}")
+        lines.append(f"- Počet requestů: {t.request_count}")
+        for model, stats in t.per_model.items():
+            lines.append(f"- {model}: {stats['total']} tokenů / {stats['requests']} req")
+
         return "\n".join(lines)
 
     def to_full_log(self) -> dict:
         """Full JSON log with all data including NPC thinking."""
         return {
             "session_id": self.session_id,
+            "scenario_id": self.scenario.id,
             "scenario": self.scenario.title,
             "created_at": self.created_at,
             "status": self.status,
             "rounds": self.rounds,
             "epilogue": self.epilogue,
+            "tokens": self.token_tracker.to_dict(),
+            "models": {
+                "narrator": self.narrator.model,
+                **{npc.id: npc.model for npc in self.npcs},
+            },
+            "npcs": [
+                {"id": npc.id, "name": npc.name, "faction": npc.faction, "model": npc.model}
+                for npc in self.npcs
+            ],
         }
 
     def pause(self):
@@ -256,6 +293,9 @@ async def run_session():
             print(f"  {npc['name']}: \"{npc.get('dialogue', '...')[:80]}\"")
         elif event_type == "epilogue":
             print(f"\n=== EPILOG ===\n{data['text'][:300]}...")
+        elif event_type == "tokens":
+            t = data
+            print(f"  [tokens] {t['total_tokens']} total / {t['request_count']} requests")
         elif event_type == "error":
             print(f"\n!!! CHYBA: {data['error']}")
 

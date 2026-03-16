@@ -43,17 +43,43 @@
         }
         .status-dot.idle { background: #6b7280; }
         .status-dot.running { background: #22c55e; animation: pulse-glow 1s infinite; }
+        .status-dot.paused { background: #f59e0b; }
         .status-dot.finished { background: #3b82f6; }
         .status-dot.error { background: #ef4444; }
 
         #story::-webkit-scrollbar { width: 6px; }
         #story::-webkit-scrollbar-track { background: #1a1a2e; }
         #story::-webkit-scrollbar-thumb { background: #4a4a6a; border-radius: 3px; }
+
+        input[type=range] {
+            -webkit-appearance: none; appearance: none;
+            width: 100%; height: 4px; border-radius: 2px;
+            background: #374151; outline: none;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none; appearance: none;
+            width: 14px; height: 14px; border-radius: 50%;
+            background: #8b5cf6; cursor: pointer;
+        }
+
+        .modal-overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.8);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 100;
+        }
+        .modal-content {
+            background: #0f0f1a; border: 1px solid #374151; border-radius: 8px;
+            max-width: 800px; width: 90%; max-height: 80vh; overflow-y: auto;
+            padding: 24px;
+        }
+        .modal-content::-webkit-scrollbar { width: 6px; }
+        .modal-content::-webkit-scrollbar-track { background: #1a1a2e; }
+        .modal-content::-webkit-scrollbar-thumb { background: #4a4a6a; border-radius: 3px; }
     </style>
 </head>
 <body class="min-h-screen">
 
-<div class="max-w-6xl mx-auto p-4">
+<div class="max-w-7xl mx-auto p-4">
 
     <!-- Header -->
     <header class="flex items-center justify-between mb-6 border-b border-gray-800 pb-4">
@@ -61,18 +87,30 @@
             <h1 class="text-2xl font-bold text-purple-400">AI ROOM</h1>
             <p class="text-xs text-gray-500">Autonomous RPG Negotiation Simulator</p>
         </div>
-        <div class="flex items-center gap-4">
+        <div class="flex items-center gap-3">
+            <select id="scenarioSelect" class="bg-gray-900 border border-gray-700 text-gray-300 text-xs rounded px-2 py-2">
+                <option value="">Nacitam...</option>
+            </select>
+
             <div class="text-xs text-gray-500">
                 <span class="status-dot" id="statusDot"></span>
                 <span id="statusText">Idle</span>
             </div>
             <button id="btnStart" onclick="startSession()"
                 class="bg-purple-700 hover:bg-purple-600 text-white px-4 py-2 text-sm rounded transition">
-                Spustit simulaci
+                Spustit
+            </button>
+            <button id="btnPause" onclick="pauseSession()"
+                class="bg-yellow-800 hover:bg-yellow-700 text-gray-300 px-3 py-2 text-sm rounded transition hidden">
+                Pauza
+            </button>
+            <button id="btnResume" onclick="resumeSession()"
+                class="bg-green-800 hover:bg-green-700 text-gray-300 px-3 py-2 text-sm rounded transition hidden">
+                Pokracovat
             </button>
             <button id="btnStop" onclick="stopSession()"
-                class="bg-red-900 hover:bg-red-800 text-gray-300 px-4 py-2 text-sm rounded transition hidden">
-                Zastavit
+                class="bg-red-900 hover:bg-red-800 text-gray-300 px-3 py-2 text-sm rounded transition hidden">
+                Stop
             </button>
         </div>
     </header>
@@ -81,82 +119,98 @@
     <div class="flex gap-4">
 
         <!-- Main story area -->
-        <div class="flex-1">
-            <!-- Active phase indicator -->
+        <div class="flex-1 min-w-0">
             <div id="phaseIndicator" class="mb-3 text-xs text-gray-500 hidden">
                 <span class="inline-block w-2 h-2 bg-purple-500 rounded-full animate-pulse mr-1"></span>
                 <span id="phaseText"></span>
             </div>
 
-            <!-- Story scroll -->
             <div id="story" class="space-y-4 overflow-y-auto" style="max-height: calc(100vh - 200px);">
                 <div id="emptyState" class="text-center py-20 text-gray-600">
                     <div class="text-4xl mb-4">&#x1f3ad;</div>
-                    <p class="text-lg">Zatím žádná simulace</p>
-                    <p class="text-sm mt-2">Klikněte na "Spustit simulaci" pro zahájení vyjednávání</p>
+                    <p class="text-lg">Zatim zadna simulace</p>
+                    <p class="text-sm mt-2">Zvolte scenar a kliknete na "Spustit"</p>
                 </div>
             </div>
 
-            <!-- Epilogue -->
             <div id="epilogueSection" class="hidden mt-6 border-t border-purple-900 pt-4">
                 <h2 class="text-lg font-bold text-purple-400 mb-2">Epilog</h2>
                 <div id="epilogueText" class="text-gray-300 leading-relaxed whitespace-pre-line"></div>
             </div>
         </div>
 
-        <!-- Sidebar: NPC status + past sessions -->
+        <!-- Sidebar -->
         <div class="w-72 flex-shrink-0 space-y-4">
+
+            <!-- Token stats -->
+            <div class="bg-gray-900/50 border border-gray-800 rounded p-3">
+                <div class="flex justify-between text-xs mb-2">
+                    <span class="text-gray-400">Tokeny</span>
+                    <span id="tokenTotal" class="text-purple-400 font-bold">0</span>
+                </div>
+                <div class="grid grid-cols-2 gap-1 text-[10px] text-gray-500">
+                    <div>Prompt: <span id="tokenPrompt" class="text-gray-400">0</span></div>
+                    <div>Completion: <span id="tokenCompletion" class="text-gray-400">0</span></div>
+                    <div>Requesty: <span id="tokenRequests" class="text-gray-400">0</span></div>
+                    <div>Req/min: <span id="tokenRate" class="text-gray-400">-</span></div>
+                </div>
+            </div>
+
+            <!-- Speed control -->
+            <div class="bg-gray-900/50 border border-gray-800 rounded p-3">
+                <div class="flex justify-between text-xs mb-1">
+                    <span class="text-gray-400">Rychlost (delay)</span>
+                    <span id="delayValue" class="text-purple-400">3.5s</span>
+                </div>
+                <input type="range" id="speedSlider" min="0.5" max="10" step="0.5" value="3.5"
+                    oninput="onSpeedChange(this.value)">
+                <div class="flex justify-between text-[10px] text-gray-600 mt-1">
+                    <span>0.5s (rychle)</span>
+                    <span>10s (pomalu)</span>
+                </div>
+            </div>
 
             <!-- Tension meter -->
             <div class="bg-gray-900/50 border border-gray-800 rounded p-3">
                 <div class="flex justify-between text-xs mb-1">
-                    <span class="text-gray-400">Napětí</span>
+                    <span class="text-gray-400">Napeti</span>
                     <span id="tensionValue" class="text-purple-400">0/10</span>
                 </div>
                 <div class="bg-gray-800 rounded-full overflow-hidden">
                     <div id="tensionBar" class="tension-bar bg-gradient-to-r from-green-500 via-yellow-500 to-red-500" style="width: 0%"></div>
                 </div>
                 <div class="flex justify-between text-[10px] text-gray-600 mt-1">
-                    <span>Klidné</span>
-                    <span id="roundCounter">Kolo: 0/20</span>
-                    <span>Kritické</span>
+                    <span>Klidne</span>
+                    <span id="roundCounter">Kolo: 0/?</span>
+                    <span>Kriticke</span>
                 </div>
             </div>
 
-            <!-- NPC cards -->
+            <!-- NPC cards (dynamic) -->
             <div class="space-y-2">
-                <h3 class="text-xs text-gray-500 uppercase tracking-wider">Aktéři</h3>
-
-                <div id="npc1Card" class="npc-card npc-1 bg-gray-900/50 border border-gray-800 rounded p-3">
-                    <div class="npc-name text-sm font-bold">Dr. Elena Vasquez</div>
-                    <div class="text-[10px] text-gray-500">NovaTech</div>
-                    <div id="npc1Emotion" class="text-xs mt-1 text-gray-400">—</div>
-                    <div id="npc1Model" class="text-[10px] text-gray-700 mt-1">mistral-small-3.1</div>
-                </div>
-
-                <div id="npc2Card" class="npc-card npc-2 bg-gray-900/50 border border-gray-800 rounded p-3">
-                    <div class="npc-name text-sm font-bold">Matai Rongo</div>
-                    <div class="text-[10px] text-gray-500">Kai'nua</div>
-                    <div id="npc2Emotion" class="text-xs mt-1 text-gray-400">—</div>
-                    <div id="npc2Model" class="text-[10px] text-gray-700 mt-1">llama-4-scout</div>
-                </div>
-
-                <div id="npc3Card" class="npc-card npc-3 bg-gray-900/50 border border-gray-800 rounded p-3">
-                    <div class="npc-name text-sm font-bold">Ministr Li Wei Chen</div>
-                    <div class="text-[10px] text-gray-500">Tuvanu</div>
-                    <div id="npc3Emotion" class="text-xs mt-1 text-gray-400">—</div>
-                    <div id="npc3Model" class="text-[10px] text-gray-700 mt-1">qwen3-4b</div>
-                </div>
+                <h3 class="text-xs text-gray-500 uppercase tracking-wider">Akteri</h3>
+                <div id="npcCards"></div>
             </div>
 
             <!-- Past sessions -->
             <div>
                 <h3 class="text-xs text-gray-500 uppercase tracking-wider mb-2">Historie</h3>
-                <div id="sessionsList" class="space-y-1 text-xs max-h-48 overflow-y-auto">
-                    <div class="text-gray-600">Načítám...</div>
+                <div id="sessionsList" class="space-y-1 text-xs max-h-60 overflow-y-auto">
+                    <div class="text-gray-600">Nacitam...</div>
                 </div>
             </div>
         </div>
+    </div>
+</div>
+
+<!-- History detail modal -->
+<div id="historyModal" class="modal-overlay hidden" onclick="if(event.target===this)closeModal()">
+    <div class="modal-content">
+        <div class="flex justify-between items-center mb-4">
+            <h2 id="modalTitle" class="text-lg font-bold text-purple-400">Session</h2>
+            <button onclick="closeModal()" class="text-gray-500 hover:text-gray-300 text-xl">&times;</button>
+        </div>
+        <div id="modalBody" class="space-y-4 text-sm"></div>
     </div>
 </div>
 
@@ -164,147 +218,151 @@
 const story = document.getElementById('story');
 const emptyState = document.getElementById('emptyState');
 let ws = null;
+let sessionStartTime = null;
+let maxRounds = 20;
 
+// ---- Helpers ----
+function el(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text) e.textContent = text;
+    return e;
+}
+
+function formatNum(n) {
+    if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+    return n.toString();
+}
+
+// ---- WebSocket ----
 function connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(proto + '//' + location.host + '/ws');
 
-    ws.onopen = () => updateStatus('connected');
+    ws.onopen = () => updateWsStatus('connected');
     ws.onclose = () => {
-        updateStatus('disconnected');
+        updateWsStatus('disconnected');
         setTimeout(connect, 3000);
     };
-    ws.onmessage = (e) => {
-        const data = JSON.parse(e.data);
-        handleEvent(data);
-    };
+    ws.onmessage = (e) => handleEvent(JSON.parse(e.data));
 }
 
 function handleEvent(data) {
     switch (data.type) {
         case 'status':
             setSessionStatus(data.status, data.session_id);
+            if (data.max_rounds) maxRounds = data.max_rounds;
             break;
-        case 'phase':
-            showPhase(data);
+        case 'phase': showPhase(data); break;
+        case 'round': renderRound(data); break;
+        case 'npc_action': renderNpcAction(data.round, data.npc); break;
+        case 'epilogue': renderEpilogue(data.text); break;
+        case 'tokens': updateTokens(data); break;
+        case 'speed':
+            document.getElementById('speedSlider').value = data.delay;
+            document.getElementById('delayValue').textContent = data.delay + 's';
             break;
-        case 'round':
-            renderRound(data);
-            break;
-        case 'npc_action':
-            renderNpcAction(data.round, data.npc);
-            break;
-        case 'epilogue':
-            renderEpilogue(data.text);
-            break;
-        case 'error':
-            renderError(data.error);
-            break;
-        case 'pong':
-            break;
+        case 'error': renderError(data.error); break;
     }
 }
 
 function setSessionStatus(status, sessionId) {
     const dot = document.getElementById('statusDot');
     const text = document.getElementById('statusText');
-    const btnStart = document.getElementById('btnStart');
-    const btnStop = document.getElementById('btnStop');
 
     dot.className = 'status-dot ' + status;
-    const labels = { idle: 'Připraveno', running: 'Běží', finished: 'Dokončeno', paused: 'Pozastaveno', error: 'Chyba' };
+    const labels = { idle: 'Pripraveno', running: 'Bezi', finished: 'Dokonceno', paused: 'Pozastaveno', error: 'Chyba' };
     text.textContent = labels[status] || status;
 
-    if (status === 'running') {
-        btnStart.classList.add('hidden');
-        btnStop.classList.remove('hidden');
-    } else {
-        btnStart.classList.remove('hidden');
-        btnStop.classList.add('hidden');
-    }
+    document.getElementById('btnStart').classList.toggle('hidden', status === 'running' || status === 'paused');
+    document.getElementById('btnStop').classList.toggle('hidden', status !== 'running' && status !== 'paused');
+    document.getElementById('btnPause').classList.toggle('hidden', status !== 'running');
+    document.getElementById('btnResume').classList.toggle('hidden', status !== 'paused');
 
+    if (status === 'running' && !sessionStartTime) sessionStartTime = Date.now();
     if (status === 'finished') {
         document.getElementById('phaseIndicator').classList.add('hidden');
+        sessionStartTime = null;
         loadSessions();
     }
 }
 
 function showPhase(data) {
-    const el = document.getElementById('phaseIndicator');
-    const text = document.getElementById('phaseText');
-    el.classList.remove('hidden');
-    text.textContent = data.detail || '';
-
-    // Highlight active NPC card
+    document.getElementById('phaseIndicator').classList.remove('hidden');
+    document.getElementById('phaseText').textContent = data.detail || '';
     document.querySelectorAll('.npc-card').forEach(c => c.classList.remove('active-indicator'));
     if (data.npc_id) {
-        const idx = {'npc_1': 1, 'npc_2': 2, 'npc_3': 3}[data.npc_id];
-        const card = document.getElementById('npc' + idx + 'Card');
+        const card = document.getElementById('card-' + data.npc_id);
         if (card) card.classList.add('active-indicator');
     }
 }
 
+// ---- Tokens ----
+function updateTokens(data) {
+    document.getElementById('tokenTotal').textContent = formatNum(data.total_tokens || 0);
+    document.getElementById('tokenPrompt').textContent = formatNum(data.total_prompt || 0);
+    document.getElementById('tokenCompletion').textContent = formatNum(data.total_completion || 0);
+    document.getElementById('tokenRequests').textContent = data.request_count || 0;
+
+    if (sessionStartTime && data.request_count > 0) {
+        const minutes = (Date.now() - sessionStartTime) / 60000;
+        if (minutes > 0.1) {
+            document.getElementById('tokenRate').textContent = (data.request_count / minutes).toFixed(1);
+        }
+    }
+}
+
+// ---- Speed ----
+let speedTimeout = null;
+function onSpeedChange(val) {
+    document.getElementById('delayValue').textContent = val + 's';
+    clearTimeout(speedTimeout);
+    speedTimeout = setTimeout(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'set_speed', delay: parseFloat(val) }));
+        }
+    }, 200);
+}
+
+// ---- Rendering ----
 function renderRound(data) {
     emptyState.style.display = 'none';
     const roundNum = data.round;
     const narrator = data.narrator || {};
     const npcActions = data.npc_actions || [];
 
-    // Update tension
     const tension = narrator.tension || 0;
     document.getElementById('tensionValue').textContent = tension + '/10';
     document.getElementById('tensionBar').style.width = (tension * 10) + '%';
-    document.getElementById('roundCounter').textContent = 'Kolo: ' + roundNum + '/20';
+    document.getElementById('roundCounter').textContent = 'Kolo: ' + roundNum + '/' + maxRounds;
 
-    // Round container
-    const container = document.createElement('div');
-    container.className = 'fade-in';
+    const container = el('div', 'fade-in');
     container.id = 'round-' + roundNum;
 
-    // Round header
-    const header = document.createElement('div');
-    header.className = 'text-xs text-gray-600 uppercase tracking-wider mb-2';
-    header.textContent = 'Kolo ' + roundNum;
-    container.appendChild(header);
+    container.appendChild(el('div', 'text-xs text-gray-600 uppercase tracking-wider mb-2', 'Kolo ' + roundNum));
 
-    // Narration
     const narration = narrator.narration || '';
     if (narration) {
-        const narDiv = document.createElement('div');
-        narDiv.className = 'narrator-text mb-3 text-sm leading-relaxed';
-        narDiv.textContent = narration;
-        container.appendChild(narDiv);
+        container.appendChild(el('div', 'narrator-text mb-3 text-sm leading-relaxed', narration));
     }
 
-    // NPC actions
     for (const action of npcActions) {
         container.appendChild(createNpcBubble(action));
     }
 
-    // Divider
-    const divider = document.createElement('div');
-    divider.className = 'border-t border-gray-800/50 my-4';
-    container.appendChild(divider);
-
+    container.appendChild(el('div', 'border-t border-gray-800/50 my-4'));
     story.appendChild(container);
     story.scrollTop = story.scrollHeight;
 }
 
 function renderNpcAction(roundNum, npc) {
-    // Update emotion in sidebar
-    const npcIdx = {'npc_1': 1, 'npc_2': 2, 'npc_3': 3}[npc.id];
-    if (npcIdx) {
-        const emotionEl = document.getElementById('npc' + npcIdx + 'Emotion');
-        if (emotionEl) emotionEl.textContent = npc.emotion || '—';
-    }
+    const emotionEl = document.getElementById('emotion-' + npc.id);
+    if (emotionEl) emotionEl.textContent = npc.emotion || '\u2014';
 
-    // Remove active indicator
     document.querySelectorAll('.npc-card').forEach(c => c.classList.remove('active-indicator'));
 
-    // Add to story if round container exists
     const roundContainer = document.getElementById('round-' + roundNum);
     if (roundContainer) {
-        // Insert before divider
         const divider = roundContainer.querySelector('.border-t');
         if (divider) {
             roundContainer.insertBefore(createNpcBubble(npc), divider);
@@ -320,141 +378,256 @@ function createNpcBubble(action) {
     const colors = {1: 'blue', 2: 'emerald', 3: 'amber'};
     const color = colors[npcIdx] || 'gray';
 
-    const bubble = document.createElement('div');
-    bubble.className = 'mb-3 pl-3 border-l-2 border-' + color + '-500/30';
+    const bubble = el('div', 'mb-3 pl-3 border-l-2 border-' + color + '-500/30');
 
-    const nameRow = document.createElement('div');
-    nameRow.className = 'flex items-center gap-2 mb-1';
-
-    const name = document.createElement('span');
-    name.className = 'text-sm font-bold text-' + color + '-400';
-    name.textContent = action.name;
-
-    const faction = document.createElement('span');
-    faction.className = 'text-[10px] text-gray-600';
-    faction.textContent = action.faction;
-
-    const emotion = document.createElement('span');
-    emotion.className = 'text-[10px] text-gray-500 italic ml-auto';
-    emotion.textContent = action.emotion || '';
-
-    nameRow.appendChild(name);
-    nameRow.appendChild(faction);
-    nameRow.appendChild(emotion);
+    const nameRow = el('div', 'flex items-center gap-2 mb-1');
+    nameRow.appendChild(el('span', 'text-sm font-bold text-' + color + '-400', action.name));
+    nameRow.appendChild(el('span', 'text-[10px] text-gray-600', action.faction));
+    nameRow.appendChild(el('span', 'text-[10px] text-gray-500 italic ml-auto', action.emotion || ''));
     bubble.appendChild(nameRow);
 
-    // Thinking (collapsible)
     if (action.thinking) {
         const thinkDiv = document.createElement('details');
         thinkDiv.className = 'mb-1';
-        const summary = document.createElement('summary');
-        summary.className = 'thinking cursor-pointer select-none';
-        summary.textContent = '[interní úvaha]';
-        const thinkContent = document.createElement('div');
-        thinkContent.className = 'thinking pl-3 mt-1';
-        thinkContent.textContent = action.thinking;
+        const summary = el('summary', 'thinking cursor-pointer select-none', '[interni uvaha]');
         thinkDiv.appendChild(summary);
-        thinkDiv.appendChild(thinkContent);
+        thinkDiv.appendChild(el('div', 'thinking pl-3 mt-1', action.thinking));
         bubble.appendChild(thinkDiv);
     }
 
-    // Dialogue
     if (action.dialogue) {
-        const dlg = document.createElement('div');
-        dlg.className = 'dialogue';
-        dlg.textContent = '\u201E' + action.dialogue + '\u201C';
-        bubble.appendChild(dlg);
+        bubble.appendChild(el('div', 'dialogue', '\u201E' + action.dialogue + '\u201C'));
     }
 
-    // Action description
     if (action.action && action.action !== action.dialogue) {
-        const actDiv = document.createElement('div');
-        actDiv.className = 'text-xs text-gray-500 mt-1 italic';
-        actDiv.textContent = action.action;
-        bubble.appendChild(actDiv);
+        bubble.appendChild(el('div', 'text-xs text-gray-500 mt-1 italic', action.action));
     }
 
     return bubble;
 }
 
 function renderEpilogue(text) {
-    const section = document.getElementById('epilogueSection');
-    const textEl = document.getElementById('epilogueText');
-    section.classList.remove('hidden');
-    textEl.textContent = text;
+    document.getElementById('epilogueSection').classList.remove('hidden');
+    document.getElementById('epilogueText').textContent = text;
     story.scrollTop = story.scrollHeight;
 }
 
 function renderError(error) {
-    const div = document.createElement('div');
-    div.className = 'bg-red-900/30 border border-red-800 rounded p-3 text-red-400 text-sm fade-in';
-    div.textContent = 'Chyba: ' + error;
+    const div = el('div', 'bg-red-900/30 border border-red-800 rounded p-3 text-red-400 text-sm fade-in', 'Chyba: ' + error);
     story.appendChild(div);
     story.scrollTop = story.scrollHeight;
 }
 
+// ---- NPC Cards ----
+function buildNpcCards(npcs) {
+    const container = document.getElementById('npcCards');
+    container.textContent = '';
+
+    npcs.forEach((npc, i) => {
+        const idx = i + 1;
+        const card = el('div', 'npc-card npc-' + idx + ' bg-gray-900/50 border border-gray-800 rounded p-3');
+        card.id = 'card-' + npc.id;
+
+        card.appendChild(el('div', 'npc-name text-sm font-bold', npc.name));
+        card.appendChild(el('div', 'text-[10px] text-gray-500', npc.faction));
+        const emoEl = el('div', 'text-xs mt-1 text-gray-400', '\u2014');
+        emoEl.id = 'emotion-' + npc.id;
+        card.appendChild(emoEl);
+
+        container.appendChild(card);
+    });
+}
+
+// ---- Controls ----
 async function startSession() {
-    // Clear story
-    story.innerHTML = '';
+    story.textContent = '';
+    story.appendChild(emptyState);
     emptyState.style.display = 'none';
     document.getElementById('epilogueSection').classList.add('hidden');
+    sessionStartTime = Date.now();
 
-    // Reset NPC emotions
-    for (let i = 1; i <= 3; i++) {
-        const el = document.getElementById('npc' + i + 'Emotion');
-        if (el) el.textContent = '—';
-    }
+    document.getElementById('tokenTotal').textContent = '0';
+    document.getElementById('tokenPrompt').textContent = '0';
+    document.getElementById('tokenCompletion').textContent = '0';
+    document.getElementById('tokenRequests').textContent = '0';
+    document.getElementById('tokenRate').textContent = '-';
 
-    const resp = await fetch('/api/start', { method: 'POST' });
+    document.querySelectorAll('[id^="emotion-"]').forEach(e => e.textContent = '\u2014');
+
+    const scenarioId = document.getElementById('scenarioSelect').value;
+    const resp = await fetch('/api/start', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ scenario_id: scenarioId }),
+    });
     const data = await resp.json();
-    if (data.error) {
-        alert(data.error);
+    if (data.error) alert(data.error);
+}
+
+async function stopSession() { await fetch('/api/stop', { method: 'POST' }); }
+async function pauseSession() { await fetch('/api/pause', { method: 'POST' }); }
+async function resumeSession() { await fetch('/api/resume', { method: 'POST' }); }
+
+// ---- Scenarios ----
+async function loadScenarios() {
+    const resp = await fetch('/api/scenarios');
+    const scenarios = await resp.json();
+    const select = document.getElementById('scenarioSelect');
+    select.textContent = '';
+
+    for (const s of scenarios) {
+        const opt = document.createElement('option');
+        opt.value = s.id;
+        opt.textContent = s.title;
+        opt.title = s.description;
+        select.appendChild(opt);
     }
+
+    if (scenarios.length > 0) {
+        buildNpcCards(scenarios[0].npcs);
+        maxRounds = scenarios[0].max_rounds;
+        document.getElementById('roundCounter').textContent = 'Kolo: 0/' + maxRounds;
+    }
+
+    select.addEventListener('change', () => {
+        const sc = scenarios.find(s => s.id === select.value);
+        if (sc) {
+            buildNpcCards(sc.npcs);
+            maxRounds = sc.max_rounds;
+            document.getElementById('roundCounter').textContent = 'Kolo: 0/' + maxRounds;
+        }
+    });
 }
 
-async function stopSession() {
-    await fetch('/api/stop', { method: 'POST' });
-}
-
+// ---- History ----
 async function loadSessions() {
     const resp = await fetch('/api/sessions');
     const sessions = await resp.json();
     const list = document.getElementById('sessionsList');
+    list.textContent = '';
 
     if (sessions.length === 0) {
-        list.innerHTML = '<div class="text-gray-600">Žádné záznamy</div>';
+        list.appendChild(el('div', 'text-gray-600', 'Zadne zaznamy'));
         return;
     }
 
-    list.innerHTML = '';
     for (const s of sessions) {
-        const item = document.createElement('a');
-        item.href = '/api/sessions/' + s.id + '/transcript';
-        item.target = '_blank';
-        item.className = 'block p-2 bg-gray-900/30 border border-gray-800 rounded hover:border-purple-700 transition';
-        item.innerHTML = '<div class="text-gray-300">' + s.scenario + '</div>' +
-            '<div class="text-gray-600">' + s.rounds + ' kol &middot; ' + s.created_at.slice(0, 10) + '</div>';
+        const item = el('div', 'p-2 bg-gray-900/30 border border-gray-800 rounded hover:border-purple-700 transition cursor-pointer');
+        item.addEventListener('click', () => openSessionDetail(s.id));
+
+        const title = el('div', 'text-gray-300 text-xs', s.scenario);
+        const tokens = s.total_tokens ? formatNum(s.total_tokens) + ' tok' : '';
+        const reqs = s.request_count ? ' / ' + s.request_count + ' req' : '';
+        const meta = el('div', 'text-gray-600 text-[10px]',
+            s.rounds + ' kol \u00b7 ' + s.created_at.slice(0, 10) + (tokens ? ' \u00b7 ' + tokens + reqs : ''));
+
+        item.appendChild(title);
+        item.appendChild(meta);
         list.appendChild(item);
     }
 }
 
-function updateStatus(wsStatus) {
-    // Only for WS connection status, not session status
+async function openSessionDetail(sessionId) {
+    const resp = await fetch('/api/sessions/' + sessionId + '/log');
+    if (!resp.ok) return;
+    const data = await resp.json();
+
+    document.getElementById('modalTitle').textContent = data.scenario + ' \u2014 ' + data.created_at.slice(0, 10);
+
+    const body = document.getElementById('modalBody');
+    body.textContent = '';
+
+    // Stats
+    const tokens = data.tokens || {};
+    const npcs = data.npcs || [];
+
+    const statsBox = el('div', 'bg-gray-900/50 border border-gray-800 rounded p-3 text-xs');
+    const grid = el('div', 'grid grid-cols-2 gap-2');
+
+    function statLine(label, value, cls) {
+        const d = el('div', '', '');
+        d.appendChild(document.createTextNode(label + ': '));
+        d.appendChild(el('span', cls, value));
+        return d;
+    }
+
+    grid.appendChild(statLine('Tokeny', formatNum(tokens.total_tokens || 0), 'text-purple-400'));
+    grid.appendChild(statLine('Requesty', String(tokens.request_count || 0), 'text-purple-400'));
+    grid.appendChild(statLine('Prompt', formatNum(tokens.total_prompt || 0), 'text-gray-400'));
+    grid.appendChild(statLine('Completion', formatNum(tokens.total_completion || 0), 'text-gray-400'));
+    statsBox.appendChild(grid);
+
+    if (npcs.length) {
+        const npcSection = el('div', 'mt-2 border-t border-gray-800 pt-2');
+        for (const n of npcs) {
+            const line = el('div', 'text-[10px] text-gray-500', '');
+            line.appendChild(document.createTextNode(n.name + ' (' + n.faction + '): '));
+            line.appendChild(el('span', 'text-gray-400', n.model));
+            npcSection.appendChild(line);
+        }
+        statsBox.appendChild(npcSection);
+    }
+    body.appendChild(statsBox);
+
+    // Rounds
+    for (const rd of (data.rounds || [])) {
+        const roundDiv = el('div', 'border-l-2 border-gray-800 pl-3');
+        roundDiv.appendChild(el('div', 'text-xs text-gray-600 uppercase mb-1', 'Kolo ' + rd.round));
+
+        const narration = rd.narrator?.narration || '';
+        if (narration) {
+            roundDiv.appendChild(el('div', 'narrator-text mb-2 text-xs leading-relaxed', narration));
+        }
+
+        for (const a of (rd.npc_actions || [])) {
+            const colorMap = {'npc_1': 'blue', 'npc_2': 'emerald', 'npc_3': 'amber'};
+            const c = colorMap[a.id] || 'gray';
+
+            const aDiv = el('div', 'mb-2 pl-2 border-l border-' + c + '-500/30');
+            const header = el('div', 'flex items-center gap-2');
+            header.appendChild(el('span', 'text-xs font-bold text-' + c + '-400', a.name));
+            header.appendChild(el('span', 'text-[10px] text-gray-600', a.emotion || ''));
+            aDiv.appendChild(header);
+            aDiv.appendChild(el('div', 'text-xs', '\u201E' + (a.dialogue || '') + '\u201C'));
+            roundDiv.appendChild(aDiv);
+        }
+
+        body.appendChild(roundDiv);
+    }
+
+    if (data.epilogue) {
+        const epiDiv = el('div', 'border-t border-purple-900 pt-3');
+        epiDiv.appendChild(el('div', 'text-sm font-bold text-purple-400 mb-1', 'Epilog'));
+        const epiText = el('div', 'text-xs text-gray-300 whitespace-pre-line', data.epilogue);
+        epiDiv.appendChild(epiText);
+        body.appendChild(epiDiv);
+    }
+
+    document.getElementById('historyModal').classList.remove('hidden');
+}
+
+function closeModal() {
+    document.getElementById('historyModal').classList.add('hidden');
+}
+
+function updateWsStatus(wsStatus) {
     if (wsStatus === 'disconnected') {
         document.getElementById('statusDot').className = 'status-dot idle';
     }
 }
 
-// Init
+// ---- Init ----
 connect();
+loadScenarios();
 loadSessions();
 
-// Ping keepalive
 setInterval(() => {
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'ping' }));
     }
 }, 25000);
+
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
 </script>
 
 </body>

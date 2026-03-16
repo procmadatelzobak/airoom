@@ -8,8 +8,8 @@ models:
   npc_3: "qwen/qwen3-4b:free"
 
 engine:
-  max_rounds: 20
-  delay_between_requests: 3.5  # seconds, for rate limit
+  default_scenario: "cuban_crisis"  # island | cuban_crisis
+  delay_between_requests: 3.5  # seconds, adjustable at runtime via UI
   language: "cs"  # cs = Czech
 
 web:

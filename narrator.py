@@ -1,15 +1,20 @@
 """Narrator logic — builds prompts, parses responses, tracks story."""
 
 import json
-from llm_client import chat, parse_json_response
+from llm_client import chat, parse_json_response, LLMResponse, TokenTracker
 from scenario import Scenario
 
 
 class Narrator:
-    def __init__(self, scenario: Scenario, model: str):
+    def __init__(self, scenario: Scenario, model: str, token_tracker: TokenTracker = None):
         self.scenario = scenario
         self.model = model
         self.history: list[dict] = []
+        self.tokens = token_tracker
+
+    def _track(self, resp: LLMResponse):
+        if self.tokens:
+            self.tokens.add(resp)
 
     async def open_scene(self) -> dict:
         """Generate the opening narration (round 0)."""
@@ -27,24 +32,24 @@ class Narrator:
             "kdo sedí kde. Pak dej každému NPC jeho první situaci."
         )
 
-        raw = await chat(self.model, self.scenario.narrator_prompt,
-                         [{"role": "user", "content": user_msg}])
-        result = parse_json_response(raw)
+        resp = await chat(self.model, self.scenario.narrator_prompt,
+                          [{"role": "user", "content": user_msg}])
+        self._track(resp)
+        result = parse_json_response(resp.content)
         if not result:
             result = {
-                "narration": raw,
+                "narration": resp.content,
                 "npc_situations": {},
                 "tension": 1,
                 "scenario_ended": False,
                 "end_reason": None
             }
 
-        self.history.append({"role": "narrator", "round": 0, "data": result, "raw": raw})
+        self.history.append({"role": "narrator", "round": 0, "data": result, "raw": resp.content})
         return result
 
     async def next_round(self, round_num: int, npc_actions: list[dict]) -> dict:
         """Generate narration for the next round based on NPC actions."""
-        # Build summary of what happened
         actions_text = "Akce NPC v předchozím kole:\n\n"
         for action in npc_actions:
             actions_text += (
@@ -62,9 +67,7 @@ class Narrator:
             "Jak se atmosféra změnila? Jaké jsou důsledky?"
         )
 
-        # Build message history for context
         messages = []
-        # Include last few rounds for context (not all, to save tokens)
         context_rounds = self.history[-4:]
         for entry in context_rounds:
             if entry["role"] == "narrator":
@@ -74,18 +77,19 @@ class Narrator:
 
         messages.append({"role": "user", "content": user_msg})
 
-        raw = await chat(self.model, self.scenario.narrator_prompt, messages)
-        result = parse_json_response(raw)
+        resp = await chat(self.model, self.scenario.narrator_prompt, messages)
+        self._track(resp)
+        result = parse_json_response(resp.content)
         if not result:
             result = {
-                "narration": raw,
+                "narration": resp.content,
                 "npc_situations": {},
                 "tension": round_num,
                 "scenario_ended": False,
                 "end_reason": None
             }
 
-        self.history.append({"role": "narrator", "round": round_num, "data": result, "raw": raw})
+        self.history.append({"role": "narrator", "round": round_num, "data": result, "raw": resp.content})
         return result
 
     async def write_epilogue(self, npc_actions: list[dict]) -> str:
@@ -103,5 +107,6 @@ class Narrator:
         )
 
         messages = [{"role": "user", "content": user_msg}]
-        raw = await chat(self.model, self.scenario.narrator_prompt, messages)
-        return raw
+        resp = await chat(self.model, self.scenario.narrator_prompt, messages)
+        self._track(resp)
+        return resp.content
