@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Room — Negotiation Simulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600&display=swap');
+        body { font-family: 'JetBrains Mono', monospace; background: #0a0a0f; color: #e0e0e0; }
+
+        .npc-card { transition: all 0.3s ease; }
+        .npc-card:hover { transform: translateY(-2px); }
+
+        .npc-1 { border-color: #3b82f6; }
+        .npc-1 .npc-name { color: #60a5fa; }
+        .npc-2 { border-color: #10b981; }
+        .npc-2 .npc-name { color: #34d399; }
+        .npc-3 { border-color: #f59e0b; }
+        .npc-3 .npc-name { color: #fbbf24; }
+
+        .narrator-text { color: #a78bfa; border-left: 3px solid #7c3aed; padding-left: 12px; }
+
+        .thinking { color: #6b7280; font-style: italic; font-size: 0.75rem; }
+        .dialogue { font-size: 0.95rem; }
+
+        .tension-bar { height: 6px; border-radius: 3px; transition: width 0.5s ease; }
+
+        @keyframes pulse-glow {
+            0%, 100% { box-shadow: 0 0 5px rgba(139, 92, 246, 0.3); }
+            50% { box-shadow: 0 0 20px rgba(139, 92, 246, 0.6); }
+        }
+        .active-indicator { animation: pulse-glow 2s infinite; }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .fade-in { animation: fadeIn 0.5s ease; }
+
+        .status-dot {
+            width: 8px; height: 8px; border-radius: 50%; display: inline-block;
+        }
+        .status-dot.idle { background: #6b7280; }
+        .status-dot.running { background: #22c55e; animation: pulse-glow 1s infinite; }
+        .status-dot.finished { background: #3b82f6; }
+        .status-dot.error { background: #ef4444; }
+
+        #story::-webkit-scrollbar { width: 6px; }
+        #story::-webkit-scrollbar-track { background: #1a1a2e; }
+        #story::-webkit-scrollbar-thumb { background: #4a4a6a; border-radius: 3px; }
+    </style>
+</head>
+<body class="min-h-screen">
+
+<div class="max-w-6xl mx-auto p-4">
+
+    <!-- Header -->
+    <header class="flex items-center justify-between mb-6 border-b border-gray-800 pb-4">
+        <div>
+            <h1 class="text-2xl font-bold text-purple-400">AI ROOM</h1>
+            <p class="text-xs text-gray-500">Autonomous RPG Negotiation Simulator</p>
+        </div>
+        <div class="flex items-center gap-4">
+            <div class="text-xs text-gray-500">
+                <span class="status-dot" id="statusDot"></span>
+                <span id="statusText">Idle</span>
+            </div>
+            <button id="btnStart" onclick="startSession()"
+                class="bg-purple-700 hover:bg-purple-600 text-white px-4 py-2 text-sm rounded transition">
+                Spustit simulaci
+            </button>
+            <button id="btnStop" onclick="stopSession()"
+                class="bg-red-900 hover:bg-red-800 text-gray-300 px-4 py-2 text-sm rounded transition hidden">
+                Zastavit
+            </button>
+        </div>
+    </header>
+
+    <!-- Layout: Story + Sidebar -->
+    <div class="flex gap-4">
+
+        <!-- Main story area -->
+        <div class="flex-1">
+            <!-- Active phase indicator -->
+            <div id="phaseIndicator" class="mb-3 text-xs text-gray-500 hidden">
+                <span class="inline-block w-2 h-2 bg-purple-500 rounded-full animate-pulse mr-1"></span>
+                <span id="phaseText"></span>
+            </div>
+
+            <!-- Story scroll -->
+            <div id="story" class="space-y-4 overflow-y-auto" style="max-height: calc(100vh - 200px);">
+                <div id="emptyState" class="text-center py-20 text-gray-600">
+                    <div class="text-4xl mb-4">&#x1f3ad;</div>
+                    <p class="text-lg">Zatím žádná simulace</p>
+                    <p class="text-sm mt-2">Klikněte na "Spustit simulaci" pro zahájení vyjednávání</p>
+                </div>
+            </div>
+
+            <!-- Epilogue -->
+            <div id="epilogueSection" class="hidden mt-6 border-t border-purple-900 pt-4">
+                <h2 class="text-lg font-bold text-purple-400 mb-2">Epilog</h2>
+                <div id="epilogueText" class="text-gray-300 leading-relaxed whitespace-pre-line"></div>
+            </div>
+        </div>
+
+        <!-- Sidebar: NPC status + past sessions -->
+        <div class="w-72 flex-shrink-0 space-y-4">
+
+            <!-- Tension meter -->
+            <div class="bg-gray-900/50 border border-gray-800 rounded p-3">
+                <div class="flex justify-between text-xs mb-1">
+                    <span class="text-gray-400">Napětí</span>
+                    <span id="tensionValue" class="text-purple-400">0/10</span>
+                </div>
+                <div class="bg-gray-800 rounded-full overflow-hidden">
+                    <div id="tensionBar" class="tension-bar bg-gradient-to-r from-green-500 via-yellow-500 to-red-500" style="width: 0%"></div>
+                </div>
+                <div class="flex justify-between text-[10px] text-gray-600 mt-1">
+                    <span>Klidné</span>
+                    <span id="roundCounter">Kolo: 0/20</span>
+                    <span>Kritické</span>
+                </div>
+            </div>
+
+            <!-- NPC cards -->
+            <div class="space-y-2">
+                <h3 class="text-xs text-gray-500 uppercase tracking-wider">Aktéři</h3>
+
+                <div id="npc1Card" class="npc-card npc-1 bg-gray-900/50 border border-gray-800 rounded p-3">
+                    <div class="npc-name text-sm font-bold">Dr. Elena Vasquez</div>
+                    <div class="text-[10px] text-gray-500">NovaTech</div>
+                    <div id="npc1Emotion" class="text-xs mt-1 text-gray-400">—</div>
+                    <div id="npc1Model" class="text-[10px] text-gray-700 mt-1">mistral-small-3.1</div>
+                </div>
+
+                <div id="npc2Card" class="npc-card npc-2 bg-gray-900/50 border border-gray-800 rounded p-3">
+                    <div class="npc-name text-sm font-bold">Matai Rongo</div>
+                    <div class="text-[10px] text-gray-500">Kai'nua</div>
+                    <div id="npc2Emotion" class="text-xs mt-1 text-gray-400">—</div>
+                    <div id="npc2Model" class="text-[10px] text-gray-700 mt-1">llama-4-scout</div>
+                </div>
+
+                <div id="npc3Card" class="npc-card npc-3 bg-gray-900/50 border border-gray-800 rounded p-3">
+                    <div class="npc-name text-sm font-bold">Ministr Li Wei Chen</div>
+                    <div class="text-[10px] text-gray-500">Tuvanu</div>
+                    <div id="npc3Emotion" class="text-xs mt-1 text-gray-400">—</div>
+                    <div id="npc3Model" class="text-[10px] text-gray-700 mt-1">qwen3-4b</div>
+                </div>
+            </div>
+
+            <!-- Past sessions -->
+            <div>
+                <h3 class="text-xs text-gray-500 uppercase tracking-wider mb-2">Historie</h3>
+                <div id="sessionsList" class="space-y-1 text-xs max-h-48 overflow-y-auto">
+                    <div class="text-gray-600">Načítám...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const story = document.getElementById('story');
+const emptyState = document.getElementById('emptyState');
+let ws = null;
+
+function connect() {
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(proto + '//' + location.host + '/ws');
+
+    ws.onopen = () => updateStatus('connected');
+    ws.onclose = () => {
+        updateStatus('disconnected');
+        setTimeout(connect, 3000);
+    };
+    ws.onmessage = (e) => {
+        const data = JSON.parse(e.data);
+        handleEvent(data);
+    };
+}
+
+function handleEvent(data) {
+    switch (data.type) {
+        case 'status':
+            setSessionStatus(data.status, data.session_id);
+            break;
+        case 'phase':
+            showPhase(data);
+            break;
+        case 'round':
+            renderRound(data);
+            break;
+        case 'npc_action':
+            renderNpcAction(data.round, data.npc);
+            break;
+        case 'epilogue':
+            renderEpilogue(data.text);
+            break;
+        case 'error':
+            renderError(data.error);
+            break;
+        case 'pong':
+            break;
+    }
+}
+
+function setSessionStatus(status, sessionId) {
+    const dot = document.getElementById('statusDot');
+    const text = document.getElementById('statusText');
+    const btnStart = document.getElementById('btnStart');
+    const btnStop = document.getElementById('btnStop');
+
+    dot.className = 'status-dot ' + status;
+    const labels = { idle: 'Připraveno', running: 'Běží', finished: 'Dokončeno', paused: 'Pozastaveno', error: 'Chyba' };
+    text.textContent = labels[status] || status;
+
+    if (status === 'running') {
+        btnStart.classList.add('hidden');
+        btnStop.classList.remove('hidden');
+    } else {
+        btnStart.classList.remove('hidden');
+        btnStop.classList.add('hidden');
+    }
+
+    if (status === 'finished') {
+        document.getElementById('phaseIndicator').classList.add('hidden');
+        loadSessions();
+    }
+}
+
+function showPhase(data) {
+    const el = document.getElementById('phaseIndicator');
+    const text = document.getElementById('phaseText');
+    el.classList.remove('hidden');
+    text.textContent = data.detail || '';
+
+    // Highlight active NPC card
+    document.querySelectorAll('.npc-card').forEach(c => c.classList.remove('active-indicator'));
+    if (data.npc_id) {
+        const idx = {'npc_1': 1, 'npc_2': 2, 'npc_3': 3}[data.npc_id];
+        const card = document.getElementById('npc' + idx + 'Card');
+        if (card) card.classList.add('active-indicator');
+    }
+}
+
+function renderRound(data) {
+    emptyState.style.display = 'none';
+    const roundNum = data.round;
+    const narrator = data.narrator || {};
+    const npcActions = data.npc_actions || [];
+
+    // Update tension
+    const tension = narrator.tension || 0;
+    document.getElementById('tensionValue').textContent = tension + '/10';
+    document.getElementById('tensionBar').style.width = (tension * 10) + '%';
+    document.getElementById('roundCounter').textContent = 'Kolo: ' + roundNum + '/20';
+
+    // Round container
+    const container = document.createElement('div');
+    container.className = 'fade-in';
+    container.id = 'round-' + roundNum;
+
+    // Round header
+    const header = document.createElement('div');
+    header.className = 'text-xs text-gray-600 uppercase tracking-wider mb-2';
+    header.textContent = 'Kolo ' + roundNum;
+    container.appendChild(header);
+
+    // Narration
+    const narration = narrator.narration || '';
+    if (narration) {
+        const narDiv = document.createElement('div');
+        narDiv.className = 'narrator-text mb-3 text-sm leading-relaxed';
+        narDiv.textContent = narration;
+        container.appendChild(narDiv);
+    }
+
+    // NPC actions
+    for (const action of npcActions) {
+        container.appendChild(createNpcBubble(action));
+    }
+
+    // Divider
+    const divider = document.createElement('div');
+    divider.className = 'border-t border-gray-800/50 my-4';
+    container.appendChild(divider);
+
+    story.appendChild(container);
+    story.scrollTop = story.scrollHeight;
+}
+
+function renderNpcAction(roundNum, npc) {
+    // Update emotion in sidebar
+    const npcIdx = {'npc_1': 1, 'npc_2': 2, 'npc_3': 3}[npc.id];
+    if (npcIdx) {
+        const emotionEl = document.getElementById('npc' + npcIdx + 'Emotion');
+        if (emotionEl) emotionEl.textContent = npc.emotion || '—';
+    }
+
+    // Remove active indicator
+    document.querySelectorAll('.npc-card').forEach(c => c.classList.remove('active-indicator'));
+
+    // Add to story if round container exists
+    const roundContainer = document.getElementById('round-' + roundNum);
+    if (roundContainer) {
+        // Insert before divider
+        const divider = roundContainer.querySelector('.border-t');
+        if (divider) {
+            roundContainer.insertBefore(createNpcBubble(npc), divider);
+        } else {
+            roundContainer.appendChild(createNpcBubble(npc));
+        }
+        story.scrollTop = story.scrollHeight;
+    }
+}
+
+function createNpcBubble(action) {
+    const npcIdx = {'npc_1': 1, 'npc_2': 2, 'npc_3': 3}[action.id] || 1;
+    const colors = {1: 'blue', 2: 'emerald', 3: 'amber'};
+    const color = colors[npcIdx] || 'gray';
+
+    const bubble = document.createElement('div');
+    bubble.className = 'mb-3 pl-3 border-l-2 border-' + color + '-500/30';
+
+    const nameRow = document.createElement('div');
+    nameRow.className = 'flex items-center gap-2 mb-1';
+
+    const name = document.createElement('span');
+    name.className = 'text-sm font-bold text-' + color + '-400';
+    name.textContent = action.name;
+
+    const faction = document.createElement('span');
+    faction.className = 'text-[10px] text-gray-600';
+    faction.textContent = action.faction;
+
+    const emotion = document.createElement('span');
+    emotion.className = 'text-[10px] text-gray-500 italic ml-auto';
+    emotion.textContent = action.emotion || '';
+
+    nameRow.appendChild(name);
+    nameRow.appendChild(faction);
+    nameRow.appendChild(emotion);
+    bubble.appendChild(nameRow);
+
+    // Thinking (collapsible)
+    if (action.thinking) {
+        const thinkDiv = document.createElement('details');
+        thinkDiv.className = 'mb-1';
+        const summary = document.createElement('summary');
+        summary.className = 'thinking cursor-pointer select-none';
+        summary.textContent = '[interní úvaha]';
+        const thinkContent = document.createElement('div');
+        thinkContent.className = 'thinking pl-3 mt-1';
+        thinkContent.textContent = action.thinking;
+        thinkDiv.appendChild(summary);
+        thinkDiv.appendChild(thinkContent);
+        bubble.appendChild(thinkDiv);
+    }
+
+    // Dialogue
+    if (action.dialogue) {
+        const dlg = document.createElement('div');
+        dlg.className = 'dialogue';
+        dlg.textContent = '\u201E' + action.dialogue + '\u201C';
+        bubble.appendChild(dlg);
+    }
+
+    // Action description
+    if (action.action && action.action !== action.dialogue) {
+        const actDiv = document.createElement('div');
+        actDiv.className = 'text-xs text-gray-500 mt-1 italic';
+        actDiv.textContent = action.action;
+        bubble.appendChild(actDiv);
+    }
+
+    return bubble;
+}
+
+function renderEpilogue(text) {
+    const section = document.getElementById('epilogueSection');
+    const textEl = document.getElementById('epilogueText');
+    section.classList.remove('hidden');
+    textEl.textContent = text;
+    story.scrollTop = story.scrollHeight;
+}
+
+function renderError(error) {
+    const div = document.createElement('div');
+    div.className = 'bg-red-900/30 border border-red-800 rounded p-3 text-red-400 text-sm fade-in';
+    div.textContent = 'Chyba: ' + error;
+    story.appendChild(div);
+    story.scrollTop = story.scrollHeight;
+}
+
+async function startSession() {
+    // Clear story
+    story.innerHTML = '';
+    emptyState.style.display = 'none';
+    document.getElementById('epilogueSection').classList.add('hidden');
+
+    // Reset NPC emotions
+    for (let i = 1; i <= 3; i++) {
+        const el = document.getElementById('npc' + i + 'Emotion');
+        if (el) el.textContent = '—';
+    }
+
+    const resp = await fetch('/api/start', { method: 'POST' });
+    const data = await resp.json();
+    if (data.error) {
+        alert(data.error);
+    }
+}
+
+async function stopSession() {
+    await fetch('/api/stop', { method: 'POST' });
+}
+
+async function loadSessions() {
+    const resp = await fetch('/api/sessions');
+    const sessions = await resp.json();
+    const list = document.getElementById('sessionsList');
+
+    if (sessions.length === 0) {
+        list.innerHTML = '<div class="text-gray-600">Žádné záznamy</div>';
+        return;
+    }
+
+    list.innerHTML = '';
+    for (const s of sessions) {
+        const item = document.createElement('a');
+        item.href = '/api/sessions/' + s.id + '/transcript';
+        item.target = '_blank';
+        item.className = 'block p-2 bg-gray-900/30 border border-gray-800 rounded hover:border-purple-700 transition';
+        item.innerHTML = '<div class="text-gray-300">' + s.scenario + '</div>' +
+            '<div class="text-gray-600">' + s.rounds + ' kol &middot; ' + s.created_at.slice(0, 10) + '</div>';
+        list.appendChild(item);
+    }
+}
+
+function updateStatus(wsStatus) {
+    // Only for WS connection status, not session status
+    if (wsStatus === 'disconnected') {
+        document.getElementById('statusDot').className = 'status-dot idle';
+    }
+}
+
+// Init
+connect();
+loadSessions();
+
+// Ping keepalive
+setInterval(() => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'ping' }));
+    }
+}, 25000);
+</script>
+
+</body>
+</html>

@@ -1,0 +1,17 @@
+# AI Room — Autonomous RPG Negotiation Simulator
+# Configuration
+
+models:
+  narrator: "deepseek/deepseek-chat-v3-0324:free"
+  npc_1: "mistralai/mistral-small-3.1-24b-instruct:free"
+  npc_2: "meta-llama/llama-4-scout:free"
+  npc_3: "qwen/qwen3-4b:free"
+
+engine:
+  max_rounds: 20
+  delay_between_requests: 3.5  # seconds, for rate limit
+  language: "cs"  # cs = Czech
+
+web:
+  host: "0.0.0.0"
+  port: 8091
