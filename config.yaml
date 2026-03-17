@@ -2,15 +2,15 @@
 # Configuration
 
 models:
-  narrator: "deepseek/deepseek-chat-v3-0324:free"
-  npc_1: "mistralai/mistral-small-3.1-24b-instruct:free"
-  npc_2: "meta-llama/llama-4-scout:free"
-  npc_3: "qwen/qwen3-4b:free"
+  narrator: "nvidia/nemotron-3-super-120b-a12b:free"
+  npc_1: "arcee-ai/trinity-large-preview:free"
+  npc_2: "stepfun/step-3.5-flash:free"
+  npc_3: "z-ai/glm-4.5-air:free"
 
 engine:
-  default_scenario: "cuban_crisis"  # island | cuban_crisis
-  delay_between_requests: 3.5  # seconds, adjustable at runtime via UI
-  language: "cs"  # cs = Czech
+  default_scenario: "cuban_crisis"
+  delay_between_requests: 3.5
+  language: "cs"
 
 web:
   host: "0.0.0.0"

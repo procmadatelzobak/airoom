@@ -28,14 +28,14 @@ class Session:
 
         self.narrator = Narrator(
             self.scenario,
-            models.get("narrator", "deepseek/deepseek-chat-v3-0324:free"),
+            models.get("narrator", "nvidia/nemotron-3-super-120b-a12b:free"),
             token_tracker=self.token_tracker,
         )
         self.npcs = []
         npc_model_keys = ["npc_1", "npc_2", "npc_3"]
         default_models = [
             "mistralai/mistral-small-3.1-24b-instruct:free",
-            "meta-llama/llama-4-scout:free",
+            "meta-llama/llama-3.3-70b-instruct:free",
             "qwen/qwen3-4b:free",
         ]
         for i, npc_def in enumerate(self.scenario.npcs):

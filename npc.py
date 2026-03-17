@@ -5,6 +5,15 @@ from llm_client import chat, parse_json_response, TokenTracker
 from scenario import NPCDef
 
 
+def _clean_npc_result(result: dict) -> dict:
+    """Clean escaped newlines and other formatting issues from NPC response."""
+    for field in ["thinking", "action", "dialogue", "emotion"]:
+        val = result.get(field, "")
+        if isinstance(val, str):
+            result[field] = val.replace("\\n", "\n").replace("\\\"", "\"").strip()
+    return result
+
+
 class NPC:
     def __init__(self, definition: NPCDef, model: str, token_tracker: TokenTracker = None):
         self.definition = definition
@@ -20,7 +29,7 @@ class NPC:
         user_msg = f"Kolo {round_num}.\n\n"
 
         if public_actions:
-            user_msg += "Co se stalo v předchozím kole (co jsi viděl/a a slyšel/a):\n"
+            user_msg += "Co se stalo v predchozim kole (co jsi videl/a a slysel/a):\n"
             for pa in public_actions:
                 if pa["id"] != self.id:
                     user_msg += f"- {pa['name']} ({pa['faction']}): {pa.get('dialogue', '...')}\n"
@@ -28,18 +37,18 @@ class NPC:
                         user_msg += f"  (Akce: {pa['action']})\n"
             user_msg += "\n"
 
-        user_msg += f"Aktuální situace (co vnímáš):\n{situation.get('you_see', 'Nic zvláštního.')}\n\n"
+        user_msg += f"Aktualni situace (co vnimas):\n{situation.get('you_see', 'Nic zvlastniho.')}\n\n"
 
         if situation.get("options"):
-            user_msg += "Nabízené možnosti:\n"
+            user_msg += "Nabizene moznosti:\n"
             for i, opt in enumerate(situation["options"], 1):
                 user_msg += f"  {i}. {opt}\n"
-            user_msg += "(Můžeš zvolit jednu z možností nebo udělat něco úplně jiného.)\n\n"
+            user_msg += "(Muzes zvolit jednu z moznosti nebo udelat neco uplne jineho.)\n\n"
 
         if situation.get("pressure"):
             user_msg += f"Tlak: {situation['pressure']}\n\n"
 
-        user_msg += "Co uděláš? Odpověz v JSON formátu."
+        user_msg += "Co udelas? Odpovez POUZE validnim JSON objektem. Zadny text pred ani za JSON."
 
         messages = []
         for mem in self.memory[-6:]:
@@ -54,12 +63,16 @@ class NPC:
         result = parse_json_response(resp.content)
 
         if not result:
+            # LLM didn't return valid JSON — use raw text as dialogue
+            raw = resp.content[:300] if resp.content else "..."
             result = {
                 "thinking": "...",
-                "action": resp.content[:200] if resp.content else "Mlčí.",
-                "dialogue": resp.content[:200] if resp.content else "...",
+                "action": raw,
+                "dialogue": raw,
                 "emotion": "nejistota"
             }
+
+        result = _clean_npc_result(result)
 
         self.memory.append({
             "round": round_num,

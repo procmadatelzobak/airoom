@@ -18,7 +18,7 @@ _delay = 3.5  # seconds between requests (mutable at runtime)
 def set_delay(seconds: float):
     """Change the minimum delay between requests."""
     global _delay
-    _delay = max(0.5, seconds)  # floor at 0.5s to avoid hammering
+    _delay = max(0.5, seconds)
 
 
 def get_delay() -> float:
@@ -77,43 +77,64 @@ class TokenTracker:
         }
 
 
+async def _single_attempt(client, model: str, full_messages: list, temperature: float) -> LLMResponse:
+    """Make a single API call."""
+    await _rate_limit()
+    response = await client.chat.completions.create(
+        model=model,
+        messages=full_messages,
+        temperature=temperature,
+        max_tokens=2000,
+    )
+    content = response.choices[0].message.content
+    usage = response.usage
+    return LLMResponse(
+        content=content.strip() if content else "",
+        prompt_tokens=usage.prompt_tokens if usage else 0,
+        completion_tokens=usage.completion_tokens if usage else 0,
+        total_tokens=usage.total_tokens if usage else 0,
+        model=model,
+    )
+
+
 async def chat(model: str, system_prompt: str, messages: list[dict],
-               temperature: float = 0.8, max_retries: int = 3) -> LLMResponse:
+               temperature: float = 0.8, max_retries: int = 20,
+               on_status=None) -> LLMResponse:
     """Send a chat completion request to OpenRouter.
 
-    Returns:
-        LLMResponse with content and token usage.
+    On 429, keeps retrying the SAME model with increasing backoff.
+    This preserves model identity for comparison purposes.
+    on_status: optional async callback(msg) for live status updates.
     """
     client = AsyncOpenAI(api_key=OPENROUTER_API_KEY, base_url=BASE_URL)
-
     full_messages = [{"role": "system", "content": system_prompt}] + messages
 
     for attempt in range(max_retries):
-        await _rate_limit()
         try:
-            response = await client.chat.completions.create(
-                model=model,
-                messages=full_messages,
-                temperature=temperature,
-                max_tokens=2000,
-            )
-            content = response.choices[0].message.content
-            usage = response.usage
-            return LLMResponse(
-                content=content.strip() if content else "",
-                prompt_tokens=usage.prompt_tokens if usage else 0,
-                completion_tokens=usage.completion_tokens if usage else 0,
-                total_tokens=usage.total_tokens if usage else 0,
-                model=model,
-            )
+            resp = await _single_attempt(client, model, full_messages, temperature)
+            return resp
         except Exception as e:
+            err_str = str(e)
+            is_rate_limit = "429" in err_str
+
             if attempt == max_retries - 1:
                 raise
-            wait = (attempt + 1) * 5
-            print(f"  LLM error ({model}): {e}, retrying in {wait}s...")
+
+            if is_rate_limit:
+                # Backoff: 15, 20, 25, 30... seconds
+                wait = 15 + (attempt * 5)
+                print(f"  429 on {model}, retry {attempt+1}/{max_retries} in {wait}s...")
+                if on_status:
+                    await on_status(f"Rate limit ({model.split('/')[-1]}), čekám {wait}s...")
+            else:
+                wait = (attempt + 1) * 5
+                print(f"  LLM error ({model}): {e}, retrying in {wait}s...")
+                if on_status:
+                    await on_status(f"Chyba: {err_str[:80]}, retry za {wait}s...")
+
             await asyncio.sleep(wait)
 
-    return LLMResponse(model=model)
+    raise Exception(f"All {max_retries} attempts exhausted for {model}")
 
 
 def parse_json_response(text: str) -> dict | None:
@@ -122,7 +143,6 @@ def parse_json_response(text: str) -> dict | None:
     # Strip markdown code fences
     if text.startswith("```"):
         lines = text.split("\n")
-        # Remove first and last line if they are fences
         if lines[0].startswith("```"):
             lines = lines[1:]
         if lines and lines[-1].strip().startswith("```"):

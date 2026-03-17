@@ -5,6 +5,42 @@ from llm_client import chat, parse_json_response, LLMResponse, TokenTracker
 from scenario import Scenario
 
 
+def _clean_narrator_result(result: dict) -> dict:
+    """Fix common LLM issues: nested JSON in narration, escaped newlines, etc."""
+    if not result:
+        return result
+
+    # If narration contains a nested JSON string, try to parse and extract
+    narration = result.get("narration", "")
+    if isinstance(narration, str) and narration.strip().startswith("{"):
+        try:
+            inner = json.loads(narration)
+            if isinstance(inner, dict):
+                # Merge inner into result, preferring inner values
+                for key in ["narration", "npc_situations", "tension", "scenario_ended", "end_reason"]:
+                    if key in inner:
+                        result[key] = inner[key]
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    # Clean escaped newlines in narration text
+    narration = result.get("narration", "")
+    if isinstance(narration, str):
+        result["narration"] = narration.replace("\\n", "\n").strip()
+
+    # Clean NPC situations
+    situations = result.get("npc_situations", {})
+    if isinstance(situations, dict):
+        for npc_id, sit in situations.items():
+            if isinstance(sit, dict):
+                for field in ["you_see", "pressure"]:
+                    val = sit.get(field, "")
+                    if isinstance(val, str):
+                        sit[field] = val.replace("\\n", "\n").strip()
+
+    return result
+
+
 class Narrator:
     def __init__(self, scenario: Scenario, model: str, token_tracker: TokenTracker = None):
         self.scenario = scenario
@@ -19,17 +55,18 @@ class Narrator:
     async def open_scene(self) -> dict:
         """Generate the opening narration (round 0)."""
         user_msg = (
-            f"Scénář: {self.scenario.title}\n"
+            f"Scenar: {self.scenario.title}\n"
             f"{self.scenario.description}\n\n"
-            f"Účastníci vyjednávání:\n"
+            f"Ucastnici vyjednavani:\n"
         )
         for npc in self.scenario.npcs:
             user_msg += f"- {npc.name} ({npc.faction})\n"
 
         user_msg += (
-            f"\nMaximální počet kol: {self.scenario.max_rounds}\n\n"
-            "Začni vyjednávání. Popiš scénu — kde se nacházíme, jaká je atmosféra, "
-            "kdo sedí kde. Pak dej každému NPC jeho první situaci."
+            f"\nMaximalni pocet kol: {self.scenario.max_rounds}\n\n"
+            "Zacni vyjednavani. Popis scenu — kde se nachazime, jaka je atmosfera, "
+            "kdo sedi kde. Pak dej kazdemu NPC jeho prvni situaci.\n\n"
+            "DULEZITE: Odpovez POUZE validnim JSON objektem. Zadny text pred ani za JSON."
         )
 
         resp = await chat(self.model, self.scenario.narrator_prompt,
@@ -45,26 +82,28 @@ class Narrator:
                 "end_reason": None
             }
 
+        result = _clean_narrator_result(result)
         self.history.append({"role": "narrator", "round": 0, "data": result, "raw": resp.content})
         return result
 
     async def next_round(self, round_num: int, npc_actions: list[dict]) -> dict:
         """Generate narration for the next round based on NPC actions."""
-        actions_text = "Akce NPC v předchozím kole:\n\n"
+        actions_text = "Akce NPC v predchozim kole:\n\n"
         for action in npc_actions:
             actions_text += (
                 f"**{action['name']}** ({action['faction']}):\n"
-                f"  Interní úvaha: {action.get('thinking', '?')}\n"
+                f"  Interni uvaha: {action.get('thinking', '?')}\n"
                 f"  Akce: {action.get('action', '?')}\n"
-                f"  Řekl/a: \"{action.get('dialogue', '...')}\"\n"
+                f"  Rekl/a: \"{action.get('dialogue', '...')}\"\n"
                 f"  Emoce: {action.get('emotion', '?')}\n\n"
             )
 
         user_msg = (
             f"Kolo {round_num}/{self.scenario.max_rounds}\n\n"
             f"{actions_text}\n"
-            "Na základě těchto akcí popiš novou situaci. "
-            "Jak se atmosféra změnila? Jaké jsou důsledky?"
+            "Na zaklade techto akci popis novou situaci. "
+            "Jak se atmosfera zmenila? Jake jsou dusledky?\n\n"
+            "DULEZITE: Odpovez POUZE validnim JSON objektem. Zadny text pred ani za JSON."
         )
 
         messages = []
@@ -89,6 +128,7 @@ class Narrator:
                 "end_reason": None
             }
 
+        result = _clean_narrator_result(result)
         self.history.append({"role": "narrator", "round": round_num, "data": result, "raw": resp.content})
         return result
 
@@ -99,11 +139,11 @@ class Narrator:
             actions_text += f"- {action['name']} ({action['faction']}): {action.get('action', '?')}\n"
 
         user_msg = (
-            "Scénář skončil.\n\n"
-            f"Poslední akce:\n{actions_text}\n\n"
-            "Napiš finální shrnutí vyjednávání jako epilog. "
-            "Kdo vyhrál? Jaká dohoda (ne)vznikla? Jaké jsou důsledky pro každou stranu? "
-            "Piš literárním stylem, 3-5 odstavců. Odpověz ČISTÝM TEXTEM, ne JSON."
+            "Scenar skoncil.\n\n"
+            f"Posledni akce:\n{actions_text}\n\n"
+            "Napis finalni shrnuti vyjednavani jako epilog. "
+            "Kdo vyhral? Jaka dohoda (ne)vznikla? Jake jsou dusledky pro kazdou stranu? "
+            "Pis literarnim stylem, 3-5 odstavcu. Odpovez CISTYM TEXTEM, ne JSON."
         )
 
         messages = [{"role": "user", "content": user_msg}]
